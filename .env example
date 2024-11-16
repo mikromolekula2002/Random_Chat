@@ -1,0 +1,4 @@
+SERVER_PORT=7994
+# "dev" or "prod"
+ENV_TYPE=dev
+

@@ -1,0 +1,87 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "API для анонимного чата с использованием WebSocket.",
+        "title": "Random-Chat API",
+        "contact": {},
+        "version": "1.0"
+    },
+    "basePath": "/random",
+    "paths": {
+        "/": {
+            "get": {
+                "description": "Отображает домашнюю страницу приложения.",
+                "consumes": [
+                    "text/html"
+                ],
+                "produces": [
+                    "text/html"
+                ],
+                "tags": [
+                    "Pages"
+                ],
+                "summary": "Home Page",
+                "responses": {
+                    "200": {
+                        "description": "HTML страницы успешно загружен",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/chat": {
+            "get": {
+                "description": "Отображает страницу чата приложения.",
+                "consumes": [
+                    "text/html"
+                ],
+                "produces": [
+                    "text/html"
+                ],
+                "tags": [
+                    "Pages"
+                ],
+                "summary": "Chat Page",
+                "responses": {
+                    "200": {
+                        "description": "HTML страницы успешно загружен",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/ws": {
+            "get": {
+                "description": "Создает WebSocket соединение для пользователя и обрабатывает события через WebSocket.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "WebSocket"
+                ],
+                "summary": "Подключение к WebSocket",
+                "responses": {
+                    "101": {
+                        "description": "WebSocket соединение успешно установлено",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Ошибка при установке WebSocket соединения",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

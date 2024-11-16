@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Chat</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #6a11cb, #2575fc);
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 2rem;
+            text-align: center;
+        }
+
+        #status {
+            margin-top: 10px;
+            font-size: 1.2rem;
+            transition: color 0.3s, transform 0.3s; /* Добавлена анимация */
+        }
+
+        #status.highlight {
+            color: #00ff00; /* Зеленый цвет для привлечения внимания */
+            transform: scale(1.2); /* Легкое увеличение текста */
+        }
+
+        #chat {
+            margin-top: 20px;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+            width: 60%;
+            height: 80%;
+            display: flex;
+            flex-direction: column;
+            position: relative; /* Обязательно добавьте эту строку для работы position: absolute в кнопке */
+        }
+
+        #messages {
+            flex: 1;
+            background: rgba(255, 255, 255, 0.15);
+            border: none;
+            border-radius: 8px;
+            padding: 10px;
+            overflow-y: auto;
+            color: #fff;
+        }
+
+        #inputContainer {
+            display: flex;
+            margin-top: 10px;
+        }
+
+        #messageInput {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            border-radius: 8px;
+            outline: none;
+            font-size: 1rem;
+            color: #333;
+        }
+
+        #messageInput::placeholder {
+            color: #aaa;
+        }
+
+        #sendButton {
+            margin-left: 10px;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            background: #2575fc;
+            color: #fff;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        #sendButton:hover {
+            background: #1a5fcc;
+        }
+
+        #sendButton:disabled {
+            background: #555;
+            cursor: not-allowed;
+        }
+
+        .searchResult {
+            font-weight: bold;
+            color: #ff6f61; /* Розовый цвет для выделения текста */
+            margin-top: 10px;
+        }
+
+        .user-name {
+            font-weight: bold;
+        }
+
+        /* Кнопка Leave Chat */
+        #leaveButton {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            background: #ff3b30; /* Красный цвет */
+            color: #fff;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        #leaveButton:hover {
+            background: #ff1a10;
+        }
+
+        #researchButton {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            background: #2575fc;
+            color: #fff;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        #researchButton:hover {
+            background: #1a5fcc;
+        }
+
+    </style>
+</head>
+<body>
+    <h1>Anonymous Chat</h1>
+    <div id="status">You now in room.</div>
+    <div id="chat">
+        <button id="researchButton">Search new user</button>
+        <div id="messages"></div>
+        <div id="inputContainer">
+            <input id="messageInput" type="text" placeholder="Type your message..." />
+            <button id="sendButton">Send</button>
+        </div>
+    </div>
+    <button id="leaveButton">Leave Chat</button>
+
+    <script>
+        const socket = new WebSocket('ws://localhost:7994/random/ws');
+        const statusDiv = document.getElementById("status");
+        const messagesDiv = document.getElementById("messages");
+        const messageInput = document.getElementById("messageInput");
+        const sendButton = document.getElementById("sendButton");
+        const leaveButton = document.getElementById("leaveButton");
+
+        let roomID = null;
+        let userID = null;
+        let searchTimeout; // Хранение ID таймера для отмены
+        let isTimerActive = false; // Флаг для отслеживания состояния таймера
+
+        socket.onopen = function() {
+            statusDiv.textContent = "Connected to server.";
+            console.log("WebSocket connected");
+            socket.send(JSON.stringify({
+                action: "searchResult",
+                result: "Searching for a partner"
+            }));
+        };
+
+        function highlightStatus() {
+            statusDiv.classList.add("highlight"); // Добавляем класс
+            setTimeout(() => statusDiv.classList.remove("highlight"), 1000); // Убираем через 1 сек
+        }
+
+        socket.onmessage = function(event) {
+            const message = JSON.parse(event.data);
+            console.log("Message received:", message);
+
+            switch (message.action) {
+                case "searchResult":
+        // Очищаем чат и блокируем поля, если это событие о выходе пользователя или нахождении другого собеседника
+                    if (message.result === "The user has left the chat, we are waiting for a new user") {
+                        highlightStatus(); // Анимация изменения текста
+                        clearChat(); // Очищаем чат
+                        disableChat(true); // Блокируем инпут и кнопку
+
+                        clearTimeout(searchTimeout); // Полностью отменяем автоматическое действие
+                        isTimerActive = true; // Устанавливаем флаг, что таймер активен
+
+                        searchTimeout = setTimeout(() => {
+                            if (isTimerActive) {
+                                researchButton.click(); // Имитируем нажатие кнопки
+                                isTimerActive = false; // Таймер больше не активен
+                            }
+                    }, 5000);
+
+                    } else if (message.result === "Another user has been found, let's chat with him"){
+                        clearTimeout(searchTimeout); // Отменяем таймер, если пользователь найден
+                        isTimerActive = false; // Таймер неактивен
+                        
+                        highlightStatus(); // Анимация изменения текста
+                        clearChat(); // Очищаем чат
+                        disableChat(false); // Включаем поля, если сообщение не о выходе/поиске
+
+                    } else if (message.result === "Waiting for other user"){
+                        clearChat(); // Очищаем чат
+                        disableChat(true); // Блокируем инпут и кнопку
+
+                        clearTimeout(searchTimeout); // Полностью отменяем автоматическое действие
+                        isTimerActive = true; // Устанавливаем флаг, что таймер активен
+
+                       // Устанавливаем таймер на 30 для автоматического поиска нового собеседника
+                        searchTimeout = setTimeout(() => {
+                            if (isTimerActive) {
+                                researchButton.click(); // Имитируем нажатие кнопки
+                                isTimerActive = false; // Таймер больше не активен
+                            }
+                        }, 30000);
+                    }
+
+                    appendMessage(message.result, true); // Выводим сообщение
+                    break;
+
+                case "roomUpdate":
+                    if (message.roomID && message.userID) {
+                        clearTimeout(searchTimeout); // Отменяем таймер, если комната обновлена
+                        isTimerActive = false; // Таймер неактивен
+
+                        roomID = message.roomID;
+                        userID = message.userID;
+                        statusDiv.textContent = "You now in room.";
+                    } else {
+                        console.warn("Invalid roomUpdate response:", message);
+                    }
+                    break;
+
+                case "sendMessage":
+                    const sender = message.userID === userID ? "You" : "Anonymous";
+                    appendMessage(`<span class="user-name">${sender}</span>: ${message.message}`);
+                    break;
+
+                default:
+                    console.warn("Unknown action:", message.action);
+            }
+        };
+
+        socket.onerror = function(error) {
+            statusDiv.textContent = "Error occurred.";
+            console.error("WebSocket error:", error);
+        };
+
+        socket.onclose = function(event) {
+            if (!event.wasClean) {
+                statusDiv.textContent = "Connection lost. Reconnecting...";
+            }
+        };
+
+        sendButton.addEventListener("click", function() {
+            sendMessage();
+        });
+
+        messageInput.addEventListener("keypress", function(event) {
+            if (event.key === "Enter") {
+                event.preventDefault(); // Предотвращаем отправку формы при нажатии Enter
+                sendMessage();
+            }
+        });
+
+        function sendMessage() {
+            const message = messageInput.value.trim();
+            if (message === "" || !roomID || !userID || socket.readyState !== WebSocket.OPEN) {
+                console.warn("Message not sent: Invalid state or empty message.");
+                return;
+            }
+
+            socket.send(JSON.stringify({
+                action: "sendMessage",
+                room: roomID,
+                userID: userID,
+                message: message
+            }));
+
+            messageInput.value = "";
+        }
+
+        function disableChat(isDisabled) {
+            messageInput.disabled = isDisabled;
+            sendButton.disabled = isDisabled;
+            messageInput.placeholder = isDisabled ? "Waiting for a partner..." : "Type your message...";
+        }
+
+        function appendMessage(message, isSearchResult = false) {
+            const messageContainer = document.createElement("div");
+            messageContainer.style.marginBottom = "10px";
+            if (isSearchResult) {
+                const searchResultDiv = document.createElement("div");
+                searchResultDiv.classList.add("searchResult");
+                searchResultDiv.innerHTML = message;
+                messageContainer.appendChild(searchResultDiv);
+            } else {
+                messageContainer.innerHTML = message.replace("\n", "<br>");
+            }
+            messagesDiv.appendChild(messageContainer);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function clearChat() {
+            messagesDiv.innerHTML = ''; // Очищаем чат
+        }
+
+        // Обработка кнопки Leave Chat
+        leaveButton.addEventListener("click", function() {
+            window.location.href = '/random/home'; // Переход на страницу /random/home
+        });
+
+        const researchButton = document.getElementById("researchButton");
+
+        researchButton.addEventListener("click", function() {
+        // Проверяем, что все необходимые данные доступны
+            if (!roomID || !userID || socket.readyState !== WebSocket.OPEN) {
+            console.warn("Cannot start research: Invalid state.");
+            return;
+            }
+
+            socket.send(JSON.stringify({
+                action: "researchRoom",  // Действие для исследования
+                userID: userID,         // ID пользователя
+                room: roomID,           // ID комнаты
+                message: "Searching for a partner..."  // Сообщение
+            }));
+
+        // Блокируем кнопки и инпут при отправке
+        disableChat(true); // Блокируем чат во время поиска
+        });
+        
+    </script>
+</body>
+</html>
