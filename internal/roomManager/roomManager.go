@@ -3,7 +3,6 @@ package roommanager
 import (
 	"fmt"
 	"mw-chat-websocket/internal/schemas"
-	wseventmanager "mw-chat-websocket/internal/wsEventManager"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -17,81 +16,60 @@ const (
 
 var Rooms = make(map[string]*schemas.Room)
 
-type IEventManager interface {
-	SendMessageToRoom(messageData *schemas.MessageRequest, room *schemas.Room) error
-	SendRoomUpdate(conn *websocket.Conn, roomID, userID string) error
-	SendSearchResult(conn *websocket.Conn, result string) error
-}
-
 type RoomManager struct {
-	eventManager IEventManager
 }
 
-func NewRoomManager(eventManager *wseventmanager.EventManager) *RoomManager {
-	return &RoomManager{eventManager: eventManager}
+func NewRoomManager() *RoomManager {
+	return &RoomManager{}
 }
 
-func (rm *RoomManager) FindOrCreateRoom(userID string, conn *websocket.Conn, avoidRoomID string) (*schemas.Room, error) {
+func (rm *RoomManager) FindOrCreateRoom(userID string, conn *websocket.Conn, avoidRoomID string) (*schemas.Room, string, error) {
 	op := "FindOrCreateRoom"
 
 	// We are looking for an available room, excluding the room user just left.
 	for _, room := range Rooms {
 		if !room.IsFull && room.ID != avoidRoomID {
-			room, err := rm.ConnectToRoom(conn, userID, room)
+			room, searchResult, err := rm.ConnectToRoom(conn, userID, room)
 			if err != nil {
-				return nil, fmt.Errorf("%s: %v", op, err)
+				return nil, "", fmt.Errorf("%s: %v", op, err)
 			}
 
-			return room, nil
+			return room, searchResult, nil
 		}
 	}
 
 	// If there are no rooms available, we check if the old one still exists
 	if avoidRoomID != "" {
 		if room, exists := Rooms[avoidRoomID]; exists && !room.IsFull {
-			room, err := rm.ConnectToRoom(conn, userID, room)
+			room, searchResult, err := rm.ConnectToRoom(conn, userID, room)
 			if err != nil {
-				return nil, fmt.Errorf("%s: %v", op, err)
+				return nil, "", fmt.Errorf("%s: %v", op, err)
 			}
 
-			return room, nil
+			return room, searchResult, nil
 		}
 	}
 
 	// Create a new room if there are no rooms available and the previous one is also unavailable
-	room, err := rm.CreateNewRoom(conn, userID)
+	room, searchResult, err := rm.CreateNewRoom(conn, userID)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %v", op, err)
+		return nil, "", fmt.Errorf("%s: %v", op, err)
 	}
 
-	return room, nil
+	return room, searchResult, nil
 }
 
-func (rm *RoomManager) ConnectToRoom(conn *websocket.Conn, userID string, room *schemas.Room) (*schemas.Room, error) {
-	op := "ConnectToRoom"
+func (rm *RoomManager) ConnectToRoom(conn *websocket.Conn, userID string, room *schemas.Room) (*schemas.Room, string, error) {
 
 	room.Connections[userID] = conn
 	if len(room.Connections) >= 2 {
 		room.IsFull = true
 	}
 
-	for _, c := range room.Connections {
-		err := rm.eventManager.SendSearchResult(c, connectRoom)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %v", op, err)
-		}
-	}
-
-	err := rm.eventManager.SendRoomUpdate(conn, room.ID, userID)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %v", op, err)
-	}
-
-	return room, nil
+	return room, connectRoom, nil
 }
 
-func (rm *RoomManager) CreateNewRoom(conn *websocket.Conn, userID string) (*schemas.Room, error) {
-	op := "CreateNewRoom"
+func (rm *RoomManager) CreateNewRoom(conn *websocket.Conn, userID string) (*schemas.Room, string, error) {
 
 	newRoomID := uuid.New().String()
 	newRoom := &schemas.Room{
@@ -102,29 +80,12 @@ func (rm *RoomManager) CreateNewRoom(conn *websocket.Conn, userID string) (*sche
 	newRoom.Connections[userID] = conn
 	Rooms[newRoomID] = newRoom
 
-	err := rm.eventManager.SendSearchResult(conn, createRoom)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %v", op, err)
-	}
-
-	err = rm.eventManager.SendRoomUpdate(conn, newRoom.ID, userID)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %v", op, err)
-	}
-
-	return newRoom, nil
+	return newRoom, createRoom, nil
 }
 
-func (rm *RoomManager) RemoveConnectionFromRoom(room *schemas.Room, userID string) error {
-	op := "RemoveConnectionFromRoom"
+func (rm *RoomManager) RemoveConnectionFromRoom(room *schemas.Room, userID string) (string, error) {
 
 	delete(Rooms[room.ID].Connections, userID)
-
-	for _, wsConn := range Rooms[room.ID].Connections {
-		if err := rm.eventManager.SendSearchResult(wsConn, leftRoom); err != nil {
-			return fmt.Errorf("%s: %v", op, err)
-		}
-	}
 
 	if len(room.Connections) == 0 {
 		delete(Rooms, room.ID)
@@ -132,7 +93,7 @@ func (rm *RoomManager) RemoveConnectionFromRoom(room *schemas.Room, userID strin
 		room.IsFull = false
 	}
 
-	return nil
+	return leftRoom, nil
 }
 
 func (rm *RoomManager) FindRoomByUserID(userID string) (*schemas.Room, bool) {

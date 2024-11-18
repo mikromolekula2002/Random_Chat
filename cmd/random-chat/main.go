@@ -20,7 +20,7 @@ func main() {
 	}
 
 	eventManager := wseventmanager.NewEventManager()
-	roomManager := roommanager.NewRoomManager(eventManager)
+	roomManager := roommanager.NewRoomManager()
 
 	controllers := controllers.NewController(eventManager, roomManager)
 

@@ -33,10 +33,10 @@ type IEventManager interface {
 }
 
 type IRoomManager interface {
-	FindOrCreateRoom(userID string, conn *websocket.Conn, avoidRoomID string) (*schemas.Room, error)
-	ConnectToRoom(conn *websocket.Conn, userID string, room *schemas.Room) (*schemas.Room, error)
-	CreateNewRoom(conn *websocket.Conn, userID string) (*schemas.Room, error)
-	RemoveConnectionFromRoom(room *schemas.Room, userID string) error
+	FindOrCreateRoom(userID string, conn *websocket.Conn, avoidRoomID string) (*schemas.Room, string, error)
+	ConnectToRoom(conn *websocket.Conn, userID string, room *schemas.Room) (*schemas.Room, string, error)
+	CreateNewRoom(conn *websocket.Conn, userID string) (*schemas.Room, string, error)
+	RemoveConnectionFromRoom(room *schemas.Room, userID string) (string, error)
 	FindRoomByUserID(userID string) (*schemas.Room, bool)
 	RoomExists(roomID string) (*schemas.Room, error)
 }
@@ -64,9 +64,19 @@ func (ss *SocketService) ConnectSocket(ctx *gin.Context) error {
 
 	SessionPool[userID] = conn
 
-	_, err = ss.roomManager.FindOrCreateRoom(userID, conn, emptyAvoidRoomID)
+	room, searchResult, err := ss.roomManager.FindOrCreateRoom(userID, conn, emptyAvoidRoomID)
 	if err != nil {
 		return fmt.Errorf("%s: %v", op, err)
+	}
+
+	for _, wsConn := range room.Connections {
+		if err := ss.eventManager.SendSearchResult(wsConn, searchResult); err != nil {
+			return fmt.Errorf("%s : %v", op, err)
+		}
+	}
+
+	if err := ss.eventManager.SendRoomUpdate(conn, room.ID, userID); err != nil {
+		return fmt.Errorf("%s : %v", op, err)
 	}
 
 	go func() {
@@ -116,13 +126,29 @@ func (ss *SocketService) WebSocketManager(ctx *gin.Context, conn *websocket.Conn
 				return fmt.Errorf("%s : %v", op, err)
 			}
 
-			err = ss.roomManager.RemoveConnectionFromRoom(room, userID)
+			searchResult, err := ss.roomManager.RemoveConnectionFromRoom(room, userID)
 			if err != nil {
 				return fmt.Errorf("%s : %v", op, err)
 			}
 
-			_, err = ss.roomManager.FindOrCreateRoom(userID, conn, messageData.Room)
+			for _, wsConn := range room.Connections {
+				if err := ss.eventManager.SendSearchResult(wsConn, searchResult); err != nil {
+					return fmt.Errorf("%s : %v", op, err)
+				}
+			}
+
+			room, searchResult, err = ss.roomManager.FindOrCreateRoom(userID, conn, messageData.Room)
 			if err != nil {
+				return fmt.Errorf("%s : %v", op, err)
+			}
+
+			for _, wsConn := range room.Connections {
+				if err := ss.eventManager.SendSearchResult(wsConn, searchResult); err != nil {
+					return fmt.Errorf("%s : %v", op, err)
+				}
+			}
+
+			if err := ss.eventManager.SendRoomUpdate(conn, room.ID, userID); err != nil {
 				return fmt.Errorf("%s : %v", op, err)
 			}
 
@@ -136,7 +162,12 @@ func (ss *SocketService) CloseConnections(conn *websocket.Conn, userID string) {
 
 	room, found := ss.roomManager.FindRoomByUserID(userID)
 	if found {
-		if err := ss.roomManager.RemoveConnectionFromRoom(room, userID); err != nil {
+		searchResult, err := ss.roomManager.RemoveConnectionFromRoom(room, userID)
+		if err != nil {
+			log.Printf("Error while close user connection : %v", err)
+		}
+
+		if err := ss.eventManager.SendSearchResult(conn, searchResult); err != nil {
 			log.Printf("Error while close user connection : %v", err)
 		}
 	}
